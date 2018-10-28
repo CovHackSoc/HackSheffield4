@@ -9,6 +9,7 @@ import threading
 import requests
 import os
 import binascii
+import random
 
 class GlobalState:
     jobQueue = queue.Queue()
@@ -89,6 +90,7 @@ class ArtUI:
         self.brushDown = False
         self.assets = {}
         self.assets['bob_ross_hair'] = cv2.imread('assets/bob_ross_hair.png')
+        self.select_episode()
 
     def start(self):
         art = Artistry()
@@ -96,6 +98,7 @@ class ArtUI:
         cap = cv2.VideoCapture(self.config['video_input'])
         cap.set(3, self.config['width'])
         cap.set(4, self.config['height'])
+
 
         while True:
             # Check if we have anything new in our queue.
@@ -140,7 +143,12 @@ class ArtUI:
                     )
                 )
             else:
-                output = cv2.flip(overlay, 1)
+                output = np.hstack(
+                    (
+                        cv2.flip(self.screenshot, 1),
+                        cv2.flip(overlay, 1)
+                    )
+                )
 
             if config.get('fullscreen', False):
                 cv2.namedWindow('window', cv2.WND_PROP_FULLSCREEN)
@@ -149,18 +157,23 @@ class ArtUI:
             cv2.imshow('window', output)
 
             # User input
-            if cv2.waitKey(1) & 0xFF == ord('q'): break
-            if cv2.waitKey(1) & 0xFF == ord('r'):
+            key = cv2.waitKey(1)
+            if key == ord('q'): break
+            elif key == ord('r'):
                 self._reset_image()
-            if cv2.waitKey(1) & 0xFF == ord('s'):
+            elif key == ord('s'):
                 self._backup_image(frame)
                 self._reset_image()
-            if cv2.waitKey(1) & 0xFF == ord('d'):
+            elif key == ord('d'):
                 self.brushDown = not(self.brushDown)
 
 
         cap.release()
         cv2.destroyAllWindows()
+
+    def select_episode(self):
+        self.episode = random.choice(self.config['episodes'])
+        self.screenshot = cv2.imread(self.episode['file'])
 
     def _set_color(self, job):
         r = eval('0x'+job['data'][0:2])
@@ -170,6 +183,7 @@ class ArtUI:
         self.img.resetPrevious()
 
     def _reset_image(self):
+        self.select_episode()
         self.img = Image(self.config['width'], self.config['height'])
 
     def perform_job(self, job, frame):
@@ -181,10 +195,9 @@ class ArtUI:
             self.brushDown = True
         elif job['command'] == 'colour':
             self._set_color(job)
-        elif job['command'] == 'done':
+        elif job['command'] == 'save':
             # Push to the website.
-            self.backup_image(frame)
-            self._reset_image()
+            self._backup_image(frame)
         elif job['command'] == 'reset':
             self._reset_image()
 
@@ -195,12 +208,15 @@ class ArtUI:
         self.img.image = cv2.add(self.img.image, frame)
         self.img.save(image_path)
         # Now we can go post it to the form.
+        print(self.episode)
         r = requests.post(
             self.config['form']['host'],
             files={
                 'file': open(image_path, 'rb')
             },
-            data={}
+            data={
+                'episode': self.episode['name']
+            }
         )
         self._reset_image()
 

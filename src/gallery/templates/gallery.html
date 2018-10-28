@@ -15,16 +15,16 @@
     <div class="row">
 
         <div class="col-lg-12">
-            <img src="/static/bob.jpg"/>
+            <img src="/static/bob.png"/>
             <h1 class="page-header"> HackSheffield</h1>
 <!--        <h2 class="page-header"> </h2>-->
             </div>
 <!--    {{image_names}}
         <hr>-->
         {% for image in images %}
-        <div class="col-lg-6 col-md-6 col-xs-12 thumb">
+        <div class="col-lg-12 col-md-12 col-xs-12 thumb">
             <img class="img-responsive" src=" {{url_for('send_image', filename=image[0])}}" />
-            {{ image[1] }}
+            {{ image[1] }} - {{ image[2] }}
         </div>
         {% endfor %}
 

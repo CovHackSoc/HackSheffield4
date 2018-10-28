@@ -44,6 +44,7 @@ def upload():
     if request.method == "GET":
         return render_template("upload.html")
 
+
     target = os.path.join(APP_ROOT,'images/')
     print(target)
 
@@ -52,6 +53,10 @@ def upload():
     else:
         print("couldn't create uploaded directory:{}".format(target))
     print(request.files.getlist("file"))
+
+    episode = "unknown episode"
+    if 'episode' in request.form:
+        episode = request.form['episode']
 
     for upload in request.files.getlist("file"):
         print(upload)
@@ -63,8 +68,8 @@ def upload():
         upload.save(destination)
 
     query_db(
-        'INSERT INTO uploads VALUES (?, datetime(\'now\'));',
-        [filename],
+        'INSERT INTO uploads VALUES (?, ?, datetime(\'now\'));',
+        [filename, episode],
         write=True
     )
     #hoq to download the picture
