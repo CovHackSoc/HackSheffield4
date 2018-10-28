@@ -15,18 +15,22 @@ class GlobalState:
 
 class Image:
     def __init__(self, width, height, ndims=3):
-        self.image = np.zeros((height,width,3), np.uint8)
+        self.image = np.zeros((height,width,ndims), np.uint8)
         self.prevPosition = None
+
     def save(self, path):
         cv2.imwrite(path, self.image)
-    def add(self, coords, color=(255,255,0), size=10):
+
+    def add(self, coords, color=(255,255,255), size=10):
         position = (int(coords[0]), int(coords[1]))
         if self.prevPosition is not None:
             cv2.line(self.image, self.prevPosition, position, color, size*2)
         cv2.circle(self.image, position, size, color, -1)
         self.prevPosition = position
+
     def get(self):
         return self.image
+
     def resetPrevious(self):
         self.prevPosition = None
 
@@ -83,6 +87,8 @@ class ArtUI:
         self.upper_range = np.array(config['ranges']['upper'])
         self.current_color = (255,255,0)
         self.brushDown = False
+        self.assets = {}
+        self.assets['bob_ross_hair'] = cv2.imread('assets/bob_ross_hair.png')
 
     def start(self):
         art = Artistry()
@@ -93,9 +99,10 @@ class ArtUI:
 
         while True:
             # Check if we have anything new in our queue.
+            ret, frame = cap.read()
             try:
                 job = GlobalState.jobQueue.get_nowait()
-                self.perform_job(job)
+                self.perform_job(job, frame)
             except queue.Empty:
                 pass
 
@@ -118,6 +125,12 @@ class ArtUI:
             # Our UI
             overlay = cv2.add(frame, self.img.get())
 
+            if config.get('bob_ross_hair', False):
+                overlay = cv2.addWeighted(
+                    self.assets['bob_ross_hair'], 1,
+                    overlay, 1, 0)
+
+
             if config.get('developer', False):
                 output = np.hstack(
                     (
@@ -137,12 +150,29 @@ class ArtUI:
 
             # User input
             if cv2.waitKey(1) & 0xFF == ord('q'): break
+            if cv2.waitKey(1) & 0xFF == ord('r'):
+                self._reset_image()
+            if cv2.waitKey(1) & 0xFF == ord('s'):
+                self._backup_image(frame)
+                self._reset_image()
+            if cv2.waitKey(1) & 0xFF == ord('d'):
+                self.brushDown = not(self.brushDown)
 
 
         cap.release()
         cv2.destroyAllWindows()
 
-    def perform_job(self, job):
+    def _set_color(self, job):
+        r = eval('0x'+job['data'][0:2])
+        g = eval('0x'+job['data'][2:4])
+        b = eval('0x'+job['data'][4:6])
+        self.current_color = (b, g, r)
+        self.img.resetPrevious()
+
+    def _reset_image(self):
+        self.img = Image(self.config['width'], self.config['height'])
+
+    def perform_job(self, job, frame):
         global GlobalState
         if job['command'] == 'brushUp':
             self.img.resetPrevious()
@@ -150,30 +180,29 @@ class ArtUI:
         elif  job['command'] == 'brushDown':
             self.brushDown = True
         elif job['command'] == 'colour':
-            self.img.resetPrevious()
-            r = eval('0x'+job['data'][0:2])
-            g = eval('0x'+job['data'][2:4])
-            b = eval('0x'+job['data'][4:6])
-            self.current_color = (b, g, r)
+            self._set_color(job)
         elif job['command'] == 'done':
             # Push to the website.
-            self.backup_image(self.img)
-            self.img = Image(self.config['width'], self.config['height'])
+            self.backup_image(frame)
+            self._reset_image()
         elif job['command'] == 'reset':
-            self.img = Image(self.config['width'], self.config['height'])
+            self._reset_image()
 
-    def _backup_image(self):
+    def _backup_image(self, frame):
         # save it to /tmp/
-        image_id = binascii.hexlify(os.urandom(16)).decode('ascii')
-        image_path = '/tmp/{}.jpg'.format(image_id)
-        img.save(image_path)
+        image_id = binascii.hexlify(os.urandom(16)).decode('ascii')+'.jpg'
+        image_path = '/tmp/{}'.format(image_id)
+        self.img.image = cv2.add(self.img.image, frame)
+        self.img.save(image_path)
         # Now we can go post it to the form.
         r = requests.post(
             self.config['form']['host'],
             files={
-                image_id: open(image_path, 'rb')
-            }
+                'file': open(image_path, 'rb')
+            },
+            data={}
         )
+        self._reset_image()
 
 class MqttClient:
     def __init__(self, config):

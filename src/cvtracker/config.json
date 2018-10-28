@@ -2,7 +2,7 @@
     "video_input": 1,
     "width": 640,
     "height": 480,
-    "fullscreen": true,
+    "fullscreen": false,
     "developer": true,
     "ranges": {
         "lower": [50, 125, 125],
