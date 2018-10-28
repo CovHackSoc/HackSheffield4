@@ -7,6 +7,8 @@ import queue
 import paho.mqtt.client as mqtt
 import threading
 import requests
+import os
+import binascii
 
 class GlobalState:
     jobQueue = queue.Queue()
@@ -73,74 +75,105 @@ class Artistry:
 
         return results
 
-def artUI(video_input, width, height, ranges):
-    global GlobalState
-    lower_range = np.array(ranges['lower'])
-    upper_range = np.array(ranges['upper'])
-    cap = cv2.VideoCapture(video_input)
-    cap.set(3, width)
-    cap.set(4, height)
+class ArtUI:
+    def __init__(self, config):
+        self.config = config
+        self.img = Image(config['width'], config['height'])
+        self.lower_range = np.array(config['ranges']['lower'])
+        self.upper_range = np.array(config['ranges']['upper'])
+        self.current_color = (255,255,0)
+        self.brushDown = False
 
-    img = Image(width, height)
-    art = Artistry()
-    current_color = (255, 255, 0)
-    brushDown = False
-    while(True):
-        # Check the queue
-        try:
-            job = GlobalState.jobQueue.get_nowait()
-            print(job)
-            if job['command'] == 'brushUp':
-                img.resetPrevious()
-                brushDown = False
-            elif  job['command'] == 'brushDown':
-                brushDown = True
-            elif job['command'] == 'colour':
-                img.resetPrevious()
-                r = eval('0x'+job['data'][0:2])
-                g = eval('0x'+job['data'][2:4])
-                b = eval('0x'+job['data'][4:6])
-                current_color = (b, g, r)
-            elif job['command'] == 'done':
-                # save it.
+    def start(self):
+        art = Artistry()
+
+        cap = cv2.VideoCapture(self.config['video_input'])
+        cap.set(3, self.config['width'])
+        cap.set(4, self.config['height'])
+
+        while True:
+            # Check if we have anything new in our queue.
+            try:
+                job = GlobalState.jobQueue.get_nowait()
+                self.perform_job(job)
+            except queue.Empty:
                 pass
-            elif job['command'] == 'reset':
-                img = Image(width, height)
-        except queue.Empty:
-            pass
-        # Capture frame-by-frame
-        ret, frame = cap.read()
-        # Mask out the background
-        masked_background = art.mask_background(frame)
-        # Pick out a color.
-        masked_color = art.mask_color(
-            masked_background, (lower_range, upper_range))
-        # Build a mesh for the object.
-        thresh = art.thresh_image(masked_color)
-        positions = art.find_thresh_positions(thresh)
-        # Display the best position
-        try:
-            _, coords = sorted(positions)[0]
-            if brushDown:
-                img.add(coords, color=current_color)
-        except IndexError:
-            pass
-        # Our UI
-        overlay = cv2.add(frame, img.get())
-        output = np.hstack(
-            (
-                cv2.flip(masked_color, 1),
-                cv2.flip(overlay, 1),
-                cv2.flip(img.get(), 1)
-            )
-        )
-        cv2.imshow('frame', output)
-        # User input
-        if cv2.waitKey(1) & 0xFF == ord('q'): break
 
-    # When everything done, release the capture
-    cap.release()
-    cv2.destroyAllWindows()
+            ret, frame = cap.read()
+            # Mask out the background
+            masked_background = art.mask_background(frame)
+            # Pick out a color.
+            masked_color = art.mask_color(
+                masked_background, (self.lower_range, self.upper_range))
+            # Build a mesh for the object.
+            thresh = art.thresh_image(masked_color)
+            positions = art.find_thresh_positions(thresh)
+            # Display the best position
+            try:
+                _, coords = sorted(positions)[0]
+                if self.brushDown:
+                    self.img.add(coords, color=self.current_color)
+            except IndexError:
+                pass
+            # Our UI
+            overlay = cv2.add(frame, self.img.get())
+
+            if config.get('developer', False):
+                output = np.hstack(
+                    (
+                        cv2.flip(masked_color, 1),
+                        cv2.flip(overlay, 1),
+                        cv2.flip(self.img.get(), 1)
+                    )
+                )
+            else:
+                output = cv2.flip(overlay, 1)
+
+            if config.get('fullscreen', False):
+                cv2.namedWindow('window', cv2.WND_PROP_FULLSCREEN)
+                cv2.setWindowProperty(
+                    'window',cv2.WND_PROP_FULLSCREEN,cv2.WINDOW_FULLSCREEN)
+            cv2.imshow('window', output)
+
+            # User input
+            if cv2.waitKey(1) & 0xFF == ord('q'): break
+
+
+        cap.release()
+        cv2.destroyAllWindows()
+
+    def perform_job(self, job):
+        global GlobalState
+        if job['command'] == 'brushUp':
+            self.img.resetPrevious()
+            self.brushDown = False
+        elif  job['command'] == 'brushDown':
+            self.brushDown = True
+        elif job['command'] == 'colour':
+            self.img.resetPrevious()
+            r = eval('0x'+job['data'][0:2])
+            g = eval('0x'+job['data'][2:4])
+            b = eval('0x'+job['data'][4:6])
+            self.current_color = (b, g, r)
+        elif job['command'] == 'done':
+            # Push to the website.
+            self.backup_image(self.img)
+            self.img = Image(self.config['width'], self.config['height'])
+        elif job['command'] == 'reset':
+            self.img = Image(self.config['width'], self.config['height'])
+
+    def _backup_image(self):
+        # save it to /tmp/
+        image_id = binascii.hexlify(os.urandom(16)).decode('ascii')
+        image_path = '/tmp/{}.jpg'.format(image_id)
+        img.save(image_path)
+        # Now we can go post it to the form.
+        r = requests.post(
+            self.config['form']['host'],
+            files={
+                image_id: open(image_path, 'rb')
+            }
+        )
 
 class MqttClient:
     def __init__(self, config):
@@ -172,14 +205,9 @@ if __name__ == "__main__":
         exit()
     with open(sys.argv[1]) as config_file:
         config = json.load(config_file)
+        art_c = ArtUI(config)
         threading.Thread(
-            target=artUI,
-            args=(
-                config['video_input'],
-                config['width'],
-                config['height'],
-                config['ranges']
-            )
+            target=art_c.start
         ).start()
         mqtt_c = MqttClient(config['mqtt'])
         threading.Thread(
