@@ -1,0 +1,14 @@
+{
+    "video_input": 1,
+    "width": 640,
+    "height": 480,
+    "ranges": {
+        "lower": [50, 125, 125],
+        "upper": [100, 255, 255]
+    },
+    "mqtt":{
+        "host": "broker.mqttdashboard.com",
+        "port": 1883,
+        "subscription": "HackShef/bobro"
+    }
+}
