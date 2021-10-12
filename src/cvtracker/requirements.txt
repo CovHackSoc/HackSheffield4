@@ -2,7 +2,7 @@ certifi==2018.10.15
 chardet==3.0.4
 idna==2.7
 numpy==1.15.3
-opencv-python==3.4.3.18
+opencv-python==4.2.0.32
 paho-mqtt==1.4.0
 requests==2.20.0
 urllib3==1.24
